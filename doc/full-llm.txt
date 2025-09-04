@@ -7332,6 +7332,53 @@ The following resources are useful for getting started with LiveKit on React Nat
 
 ## Install LiveKit CLI
 
+**macOS**:
+
+Install the LiveKit CLI with [Homebrew](https://brew.sh/):
+
+```text
+brew install livekit-cli
+
+```
+
+---
+
+**Linux**:
+
+```text
+curl -sSL https://get.livekit.io/cli | bash
+
+```
+
+> 💡 **Tip**
+> 
+> You can also download the latest precompiled binaries [here](https://github.com/livekit/livekit-cli/releases/latest).
+
+---
+
+**Windows**:
+
+```text
+winget install LiveKit.LiveKitCLI
+
+```
+
+> 💡 **Tip**
+> 
+> You can also download the latest precompiled binaries [here](https://github.com/livekit/livekit-cli/releases/latest).
+
+---
+
+**From Source**:
+
+This repo uses [Git LFS](https://git-lfs.github.com/) for embedded video resources. Please ensure git-lfs is installed on your machine before proceeding.
+
+```text
+git clone github.com/livekit/livekit-cli
+make install
+
+```
+
 `lk` is LiveKit's suite of CLI utilities. It lets you conveniently access server APIs, create tokens, and generate test traffic all from your command line. For more details, refer to the docs in the `livekit-cli` [GitHub repo](https://github.com/livekit/livekit-cli#usage).
 
 ## Add a project
@@ -12755,6 +12802,22 @@ When you enable region pinning, you turn off automatic failover to the nearest r
 
 The following regions are available for region pinning:
 
+| Region name | Region locations |
+| `africa` | South Africa |
+| `asia` | Japan, Singapore |
+| `aus` | Australia |
+| `eu` | France, Germany, Zurich |
+| `il` | Israel |
+| `india` | India, India South |
+| `me` | Saudi Arabia, UAE |
+| `sa` | Brazil |
+| `uk` | UK |
+| `us` | US Central, US East B, US West B |
+
+> ℹ️ **Note**
+> 
+> This list of regions is subject to change. Last updated 2025-07-23.
+
 ---
 
 ---
@@ -14995,6 +15058,53 @@ While this guide assumes LiveKit Cloud, the instructions can be adapted for [sel
 Use the LiveKit CLI to manage LiveKit API keys and deploy your agent to LiveKit Cloud.
 
 1. Install the LiveKit CLI:
+
+**macOS**:
+
+Install the LiveKit CLI with [Homebrew](https://brew.sh/):
+
+```text
+brew install livekit-cli
+
+```
+
+---
+
+**Linux**:
+
+```text
+curl -sSL https://get.livekit.io/cli | bash
+
+```
+
+> 💡 **Tip**
+> 
+> You can also download the latest precompiled binaries [here](https://github.com/livekit/livekit-cli/releases/latest).
+
+---
+
+**Windows**:
+
+```text
+winget install LiveKit.LiveKitCLI
+
+```
+
+> 💡 **Tip**
+> 
+> You can also download the latest precompiled binaries [here](https://github.com/livekit/livekit-cli/releases/latest).
+
+---
+
+**From Source**:
+
+This repo uses [Git LFS](https://git-lfs.github.com/) for embedded video resources. Please ensure git-lfs is installed on your machine before proceeding.
+
+```text
+git clone github.com/livekit/livekit-cli
+make install
+
+```
 2. Link your LiveKit Cloud project to the CLI:
 
 ```shell
@@ -21089,6 +21199,10 @@ The following parameters related to turn detection and interruptions are availab
 
 - **`min_interruption_words`** _(int)_ (optional) - Default: `0`: Minimum number of words to consider an interruption, only used if STT is enabled.
 
+- **`min_endpointing_delay`** _(float)_ (optional) - Default: `0.5`: The number of seconds to wait before considering the turn complete. The session uses this delay when no turn detector model is present, or when the model indicates a likely turn boundary.
+
+- **`max_endpointing_delay`** _(float)_ (optional) - Default: `6.0`: The maximum time to wait for the user to speak after the turn detector model indicates the user is likely to continue speaking. This parameter has no effect without the turn detector model.
+
 ## Turn-taking events
 
 The `AgentSession` exposes user and agent state events to monitor the flow of a conversation:
@@ -21316,6 +21430,10 @@ const session = new voice.AgentSession({
 ### Parameters
 
 The turn detector itself has no configuration, but the `AgentSession` that uses it supports the following related parameters:
+
+- **`min_endpointing_delay`** _(float)_ (optional) - Default: `0.5`: The number of seconds to wait before considering the turn complete. The session uses this delay when no turn detector model is present, or when the model indicates a likely turn boundary.
+
+- **`max_endpointing_delay`** _(float)_ (optional) - Default: `6.0`: The maximum time to wait for the user to speak after the turn detector model indicates the user is likely to continue speaking. This parameter has no effect without the turn detector model.
 
 ## Supported languages
 
@@ -24530,13 +24648,185 @@ CMD ["uv", "run", "src/agent.py", "start"]
 
 ** Filename: `.dockerignore`**
 
+```text
+# Python bytecode and artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
 
+# Virtual environments
+.venv/
+venv/
+
+# Caches and test output
+.cache/
+.pytest_cache/
+.ruff_cache/
+coverage/
+
+# Logs and temp files
+*.log
+*.gz
+*.tgz
+.tmp
+.cache
+
+# Environment variables
+.env
+.env.*
+
+# VCS, editor, OS
+.git
+.gitignore
+.gitattributes
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+# Project docs and misc
+README.md
+LICENSE
+
+# Project tests
+test/
+tests/
+eval/
+evals/
+
+```
 
 ** Filename: `Dockerfile`**
 
+```dockerfile
+# syntax=docker/dockerfile:1
 
+# Use the official Python base image with Python 3.11
+# We use the slim variant to keep the image size smaller while still having essential tools
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION}-slim AS base
+
+# Keeps Python from buffering stdout and stderr to avoid situations where
+# the application crashes without emitting any logs due to buffering.
+ENV PYTHONUNBUFFERED=1
+
+# Disable pip version check to speed up builds
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Create a non-privileged user that the app will run under.
+# See https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#user
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/app" \
+    --shell "/sbin/nologin" \
+    --uid "${UID}" \
+    appuser
+
+# Install build dependencies required for Python packages with native extensions
+# gcc: C compiler needed for building Python packages with C extensions
+# g++: C++ compiler needed for building Python packages with C++ extensions
+# python3-dev: Python development headers needed for compilation
+# We clean up the apt cache after installation to keep the image size down
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    python3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Create a new directory for our application code
+# And set it as the working directory
+WORKDIR /app
+
+# Copy just the dependency files first, for more efficient layer caching
+COPY requirements.txt ./
+
+# Install Python dependencies using pip
+# --no-cache-dir ensures we don't use the system cache
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy all remaining pplication files into the container
+# This includes source code, configuration files, and dependency specifications
+# (Excludes files specified in .dockerignore)
+COPY . .
+
+# Change ownership of all app files to the non-privileged user
+# This ensures the application can read/write files as needed
+RUN chown -R appuser:appuser /app
+
+# Switch to the non-privileged user for all subsequent operations
+# This improves security by not running as root
+USER appuser
+
+# Pre-download any ML models or files the agent needs
+# This ensures the container is ready to run immediately without downloading
+# dependencies at runtime, which improves startup time and reliability
+RUN python agent.py download-files
+
+# Run the application
+# The "start" command tells the worker to connect to LiveKit and begin waiting for jobs.
+CMD ["python", "agent.py", "start"]
+
+```
 
 ** Filename: `.dockerignore`**
+
+```text
+# Python bytecode and artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# Caches and test output
+.cache/
+.pytest_cache/
+.ruff_cache/
+coverage/
+
+# Logs and temp files
+*.log
+*.gz
+*.tgz
+.tmp
+.cache
+
+# Environment variables
+.env
+.env.*
+
+# VCS, editor, OS
+.git
+.gitignore
+.gitattributes
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+# Project docs and misc
+README.md
+LICENSE
+
+# Project tests
+test/
+tests/
+eval/
+evals/
+
+```
 
 ---
 
@@ -24548,11 +24838,121 @@ The Dockerfile assumes that your project contains `build`, `download-files`, and
 
 ** Filename: `Dockerfile`**
 
+```dockerfile
+# syntax=docker/dockerfile:1
 
+# Use the official Node.js v22 base image with Node.js 22.10.0
+# We use the slim variant to keep the image size smaller while still having essential tools
+ARG NODE_VERSION=22
+FROM node:${NODE_VERSION}-slim AS base
+
+# Configure pnpm installation directory and ensure it is on PATH
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
+# Install required system packages and pnpm, then clean up the apt cache for a smaller image
+# ca-certificates: enables TLS/SSL for securely fetching dependencies and calling HTTPS services
+# --no-install-recommends keeps the image minimal
+RUN apt-get update -qq && apt-get install --no-install-recommends -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Pin pnpm version for reproducible builds
+RUN npm install -g pnpm@10
+
+# Create a new directory for our application code
+# And set it as the working directory
+WORKDIR /app
+
+# Copy just the dependency files first, for more efficient layer caching
+COPY package.json pnpm-lock.yaml ./
+
+# Install dependencies using pnpm
+# --frozen-lockfile ensures we use exact versions from pnpm-lock.yaml for reproducible builds
+RUN pnpm install --frozen-lockfile
+
+# Copy all remaining pplication files into the container
+# This includes source code, configuration files, and dependency specifications
+# (Excludes files specified in .dockerignore)
+COPY . .
+
+# Build the project
+# Your package.json must contain a "build" script, such as `"build": "tsc"`
+RUN pnpm build
+
+# Create a non-privileged user that the app will run under
+# See https://docs.docker.com/develop/develop-images/dockerfile_best_practices/#user
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/app" \
+    --shell "/sbin/nologin" \
+    --uid "${UID}" \
+    appuser
+
+# Set proper permissions
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Pre-download any ML models or files the agent needs
+# This ensures the container is ready to run immediately without downloading
+# dependencies at runtime, which improves startup time and reliability
+# Your package.json must contain a "download-files" script, such as `"download-files": "pnpm run build && node dist/agent.js download-files"`
+RUN pnpm download-files
+
+# Switch back to root to remove dev dependencies and finalize setup
+USER root
+RUN pnpm prune --prod && chown -R appuser:appuser /app
+USER appuser
+
+# Set Node.js to production mode
+ENV NODE_ENV=production
+
+# Run the application
+# The "start" command tells the worker to connect to LiveKit and begin waiting for jobs.
+# Your package.json must contain a "start" script, such as `"start": "node dist/agent.js start"`
+CMD [ "pnpm", "start" ]
+
+```
 
 ** Filename: `.dockerignore`**
 
+```text
+# Node.js dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
 
+# Build outputs
+dist/
+build/
+coverage/
+
+# Logs and temp files
+*.log
+*.gz
+*.tgz
+.tmp
+.cache
+
+# Environment variables
+.env
+.env.*
+
+# VCS, editor, OS
+.git
+.gitignore
+.gitattributes
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+# Project docs and misc
+README.md
+LICENSE
+
+```
 
 ** Filename: `package.json`**
 
@@ -25310,6 +25710,12 @@ Use the following guide to speak to your own OpenAI-powered voice AI agent in le
 
 - **[Realtime playground](https://playground.livekit.io)**: Experiment with the OpenAI Realtime API and personalities like the **Snarky Teenager** or **Opera Singer**.
 
+## LiveKit Agents overview
+
+LiveKit Agents is an open source framework for building realtime AI apps in Python and Node.js. It supports complex voice AI [workflows](https://docs.livekit.io/agents/build/workflows.md) with multiple agents and discrete processing steps, and includes built-in load balancing.
+
+LiveKit provides SIP support for [telephony integration](https://docs.livekit.io/agents/start/telephony.md) and full-featured [frontend SDKs](https://docs.livekit.io/agents/start/frontend.md) in multiple languages. It uses [WebRTC](https://docs.livekit.io/home/get-started/intro-to-livekit.md#what-is-webrtc) transport for end-user devices, enabling high-quality, low-latency realtime experiences. To learn more, see [LiveKit Agents](https://docs.livekit.io/agents.md).
+
 ## Realtime API
 
 LiveKit Agents serves as a bridge between your frontend — connected over WebRTC — and the OpenAI Realtime API — connected over WebSockets. LiveKit automatically converts Realtime API audio response buffers to WebRTC audio streams synchronized with text, and handles business logic like interruption handling automatically. You can add your own logic within your agent, and use LiveKit features for realtime state and data to coordinate with your frontend.
@@ -25663,9 +26069,9 @@ This section describes some of the available parameters. See the [plugin referen
 
 - **`model`** _(string)_ (optional) - Default: `gpt-4o-mini`: The model to use for the LLM. For more information, see the [OpenAI documentation](https://platform.openai.com/docs/models).
 
-- **`temperature`** _(float)_ (optional) - Default: `0.8`: 
+- **`temperature`** _(float)_ (optional) - Default: `0.8`: A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: 
+- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Additional resources
 
@@ -25894,6 +26300,12 @@ session = AgentSession(
 )
 
 ```
+
+## LiveKit Agents overview
+
+LiveKit Agents is an open source framework for building realtime AI apps in Python and Node.js. It supports complex voice AI [workflows](https://docs.livekit.io/agents/build/workflows.md) with multiple agents and discrete processing steps, and includes built-in load balancing.
+
+LiveKit provides SIP support for [telephony integration](https://docs.livekit.io/agents/start/telephony.md) and full-featured [frontend SDKs](https://docs.livekit.io/agents/start/frontend.md) in multiple languages. It uses [WebRTC](https://docs.livekit.io/home/get-started/intro-to-livekit.md#what-is-webrtc) transport for end-user devices, enabling high-quality, low-latency realtime experiences. To learn more, see [LiveKit Agents](https://docs.livekit.io/agents.md).
 
 ## Google plugin documentation
 
@@ -26289,6 +26701,12 @@ pip install "livekit-agents[google]~=1.2"
 
 ### Authentication
 
+Google Cloud credentials must be provided by one of the following methods:
+
+- Passed in the `credentials_info` dictionary.
+- Saved in the `credentials_file` JSON file (`GOOGLE_APPLICATION_CREDENTIALS` environment variable).
+- Application Default Credentials. To learn more, see [How Application Default Credentials works](https://cloud.google.com/docs/authentication/application-default-credentials)
+
 ### Usage
 
 Use a Google Cloud TTS in an `AgentSession` or as a standalone speech generator. For example, you can use this TTS in the [Voice AI quickstart](https://docs.livekit.io/agents/start/voice-ai.md).
@@ -26370,6 +26788,12 @@ pip install "livekit-agents[google]~=1.2"
 ```
 
 ### Authentication
+
+Google Cloud credentials must be provided by one of the following methods:
+
+- Passed in the `credentials_info` dictionary.
+- Saved in the `credentials_file` JSON file (`GOOGLE_APPLICATION_CREDENTIALS` environment variable).
+- Application Default Credentials. To learn more, see [How Application Default Credentials works](https://cloud.google.com/docs/authentication/application-default-credentials)
 
 ### Usage
 
@@ -26478,6 +26902,12 @@ session = AgentSession(
 )
 
 ```
+
+## LiveKit Agents overview
+
+LiveKit Agents is an open source framework for building realtime AI apps in Python and Node.js. It supports complex voice AI [workflows](https://docs.livekit.io/agents/build/workflows.md) with multiple agents and discrete processing steps, and includes built-in load balancing.
+
+LiveKit provides SIP support for [telephony integration](https://docs.livekit.io/agents/start/telephony.md) and full-featured [frontend SDKs](https://docs.livekit.io/agents/start/frontend.md) in multiple languages. It uses [WebRTC](https://docs.livekit.io/home/get-started/intro-to-livekit.md#what-is-webrtc) transport for end-user devices, enabling high-quality, low-latency realtime experiences. To learn more, see [LiveKit Agents](https://docs.livekit.io/agents.md).
 
 ## Azure plugin documentation
 
@@ -27289,9 +27719,11 @@ This section describes some of the available parameters. For a complete referenc
 
 - **`region`** _(string)_ (optional) - Default: `us-east-1`: The region to use for AWS API requests.
 
-- **`temperature`** _(float)_ (optional): Default values vary depending on the model you select. To learn more, see [Inference request parameters and response fields for foundation models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters.html).
+- **`temperature`** _(float)_ (optional): A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`tool_choice`** _([ToolChoice | Literal['auto', 'required', 'none']])_ (optional) - Default: `auto`: 
+Default values vary depending on the model you select. To learn more, see [Inference request parameters and response fields for foundation models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters.html).
+
+- **`tool_choice`** _([ToolChoice | Literal['auto', 'required', 'none']])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Amazon Nova Sonic
 
@@ -27638,6 +28070,12 @@ session = AgentSession(
 
 ```
 
+## LiveKit Agents overview
+
+LiveKit Agents is an open source framework for building realtime AI apps in Python and Node.js. It supports complex voice AI [workflows](https://docs.livekit.io/agents/build/workflows.md) with multiple agents and discrete processing steps, and includes built-in load balancing.
+
+LiveKit provides SIP support for [telephony integration](https://docs.livekit.io/agents/start/telephony.md) and full-featured [frontend SDKs](https://docs.livekit.io/agents/start/frontend.md) in multiple languages. It uses [WebRTC](https://docs.livekit.io/home/get-started/intro-to-livekit.md#what-is-webrtc) transport for end-user devices, enabling high-quality, low-latency realtime experiences. To learn more, see [LiveKit Agents](https://docs.livekit.io/agents.md).
+
 ## Groq plugin documentation
 
 The following links provide more information on each available Groq component in LiveKit Agents.
@@ -27703,11 +28141,11 @@ This section describes some of the available parameters. For a complete referenc
 
 - **`model`** _(string)_ (optional) - Default: `llama-3.3-70b-versatile`: Name of the LLM model to use. For all options, see the [Groq model list](https://console.groq.com/docs/models).
 
-- **`temperature`** _(float)_ (optional) - Default: `1.0`: 
+- **`temperature`** _(float)_ (optional) - Default: `1.0`: A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`parallel_tool_calls`** _(bool)_ (optional): 
+- **`parallel_tool_calls`** _(bool)_ (optional): Set to true to parallelize tool calls.
 
-- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: 
+- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Additional resources
 
@@ -27926,6 +28364,12 @@ session = AgentSession(
 ```
 
 For a full list of supported models, including DeepSeek, see the [Cerebras docs](https://inference-docs.cerebras.ai/introduction).
+
+## LiveKit Agents overview
+
+LiveKit Agents is an open source framework for building realtime AI apps in Python and Node.js. It supports complex voice AI [workflows](https://docs.livekit.io/agents/build/workflows.md) with multiple agents and discrete processing steps, and includes built-in load balancing.
+
+LiveKit provides SIP support for [telephony integration](https://docs.livekit.io/agents/start/telephony.md) and full-featured [frontend SDKs](https://docs.livekit.io/agents/start/frontend.md) in multiple languages. It uses [WebRTC](https://docs.livekit.io/home/get-started/intro-to-livekit.md#what-is-webrtc) transport for end-user devices, enabling high-quality, low-latency realtime experiences. To learn more, see [LiveKit Agents](https://docs.livekit.io/agents.md).
 
 ## Further reading
 
@@ -29123,11 +29567,13 @@ This section describes some of the available parameters. See the [plugin referen
 
 - **`max_tokens`** _(int)_ (optional): The maximum number of tokens to generate before stopping. To learn more, see the [Anthropic API reference](https://docs.anthropic.com/en/api/messages#body-max-tokens).
 
-- **`temperature`** _(float)_ (optional) - Default: `1`: Valid values are between `0` and `1`. To learn more, see the [Anthropic API reference](https://docs.anthropic.com/en/api/messages#body-temperature).
+- **`temperature`** _(float)_ (optional) - Default: `1`: A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`parallel_tool_calls`** _(bool)_ (optional): 
+Valid values are between `0` and `1`. To learn more, see the [Anthropic API reference](https://docs.anthropic.com/en/api/messages#body-temperature).
 
-- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: 
+- **`parallel_tool_calls`** _(bool)_ (optional): Set to true to parallelize tool calls.
+
+- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Additional resources
 
@@ -29205,9 +29651,11 @@ This section describes some of the available parameters. For a complete referenc
 
 - **`region`** _(string)_ (optional) - Default: `us-east-1`: The region to use for AWS API requests.
 
-- **`temperature`** _(float)_ (optional): Default values vary depending on the model you select. To learn more, see [Inference request parameters and response fields for foundation models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters.html).
+- **`temperature`** _(float)_ (optional): A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`tool_choice`** _([ToolChoice | Literal['auto', 'required', 'none']])_ (optional) - Default: `auto`: 
+Default values vary depending on the model you select. To learn more, see [Inference request parameters and response fields for foundation models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters.html).
+
+- **`tool_choice`** _([ToolChoice | Literal['auto', 'required', 'none']])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Amazon Nova Sonic
 
@@ -29368,11 +29816,13 @@ This section describes some of the available parameters. See the [plugin referen
 
 - **`model`** _(str | CerebrasChatModels)_ (optional) - Default: `llama3.1-8b`: Model to use for inference. To learn more, see [supported models](https://inference-docs.cerebras.ai/api-reference/chat-completions#param-model).
 
-- **`temperature`** _(float)_ (optional) - Default: `1.0`: Valid values are between `0` and `1.5`. To learn more, see the [Cerebras documentation](https://inference-docs.cerebras.ai/api-reference/chat-completions#param-temperature).
+- **`temperature`** _(float)_ (optional) - Default: `1.0`: A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`parallel_tool_calls`** _(bool)_ (optional): 
+Valid values are between `0` and `1.5`. To learn more, see the [Cerebras documentation](https://inference-docs.cerebras.ai/api-reference/chat-completions#param-temperature).
 
-- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: 
+- **`parallel_tool_calls`** _(bool)_ (optional): Set to true to parallelize tool calls.
+
+- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Links
 
@@ -29697,11 +30147,11 @@ This section describes some of the available parameters. For a complete referenc
 
 - **`model`** _(string)_ (optional) - Default: `llama-3.3-70b-versatile`: Name of the LLM model to use. For all options, see the [Groq model list](https://console.groq.com/docs/models).
 
-- **`temperature`** _(float)_ (optional) - Default: `1.0`: 
+- **`temperature`** _(float)_ (optional) - Default: `1.0`: A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`parallel_tool_calls`** _(bool)_ (optional): 
+- **`parallel_tool_calls`** _(bool)_ (optional): Set to true to parallelize tool calls.
 
-- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: 
+- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Additional resources
 
@@ -29882,7 +30332,7 @@ The following links provide more information about the Letta LLM plugin.
 
 LiveKit's [Mistral AI](https://mistral.ai/) plugin provides access to their instruction-tuned, code, and vision chat models through [La Plateforme](https://mistral.ai/products/la-plateforme). You can use Mistral AI with LiveKit Agents for conversation, reasoning, and other text-generation tasks.
 
-The Mistral AI plugin also supports [STT models](https://docs.livekit.io/reference/agents/integrations/stt/mistralai.md).
+The Mistral AI plugin also supports [STT models](https://docs.livekit.io/agents/integrations/stt/mistralai.md).
 
 ## Quick reference
 
@@ -29925,7 +30375,7 @@ This section describes some of the available parameters. See the [plugin referen
 
 - **`model`** _(string | ChatModels)_ (optional) - Default: `ministral-8b-2410`: Which Mistral AI model to use. You can pass a string or a typed enum from `ChatModels`.
 
-- **`temperature`** _(float)_ (optional): 
+- **`temperature`** _(float)_ (optional): A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
 ## Additional resources
 
@@ -30064,9 +30514,9 @@ This section describes some of the available parameters. See the [plugin referen
 
 - **`model`** _(string)_ (optional) - Default: `gpt-4o-mini`: The model to use for the LLM. For more information, see the [OpenAI documentation](https://platform.openai.com/docs/models).
 
-- **`temperature`** _(float)_ (optional) - Default: `0.8`: 
+- **`temperature`** _(float)_ (optional) - Default: `0.8`: A measure of randomness in output. A lower value results in more predictable output, while a higher value results in more creative output.
 
-- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: 
+- **`tool_choice`** _(ToolChoice | Literal['auto', 'required', 'none'])_ (optional) - Default: `auto`: Specifies whether to use tools during response generation.
 
 ## Additional resources
 
@@ -31518,6 +31968,12 @@ pip install "livekit-agents[google]~=1.2"
 
 ### Authentication
 
+Google Cloud credentials must be provided by one of the following methods:
+
+- Passed in the `credentials_info` dictionary.
+- Saved in the `credentials_file` JSON file (`GOOGLE_APPLICATION_CREDENTIALS` environment variable).
+- Application Default Credentials. To learn more, see [How Application Default Credentials works](https://cloud.google.com/docs/authentication/application-default-credentials)
+
 ### Usage
 
 Use a Google Cloud STT in an `AgentSession` or as a standalone transcription service. For example, you can use this STT in the [Voice AI quickstart](https://docs.livekit.io/agents/start/voice-ai.md).
@@ -31651,7 +32107,7 @@ The following resources provide more information about using Groq with LiveKit A
 
 LiveKit's [Mistral AI](https://mistral.ai/) plugin provides access to their STT models from the [Voxtral](https://mistral.ai/products/voxtral) family through [La Plateforme](https://mistral.ai/products/la-plateforme). You can use Mistral AI with LiveKit Agents for real-time transcription and other speech-understanding tasks.
 
-The Mistral AI plugin also supports [LLM models](https://docs.livekit.io/reference/agents/integrations/llm/mistralai.md).
+The Mistral AI plugin also supports [LLM models](https://docs.livekit.io/agents/integrations/llm/mistralai.md).
 
 ## Quick reference
 
@@ -32903,6 +33359,12 @@ pip install "livekit-agents[google]~=1.2"
 ```
 
 ### Authentication
+
+Google Cloud credentials must be provided by one of the following methods:
+
+- Passed in the `credentials_info` dictionary.
+- Saved in the `credentials_file` JSON file (`GOOGLE_APPLICATION_CREDENTIALS` environment variable).
+- Application Default Credentials. To learn more, see [How Application Default Credentials works](https://cloud.google.com/docs/authentication/application-default-credentials)
 
 ### Usage
 
@@ -34920,6 +35382,10 @@ Depending on your SIP trunking provider, you might need to use a _SIP endpoint_ 
 
 For example, if your SIP URI is `sip:vjnxecm0tjk.sip.livekit.cloud`, your SIP endpoint is `vjnxecm0tjk.sip.livekit.cloud`.
 
+> ℹ️ **Region-based endpoints**
+> 
+> To restrict calls to a specific region, replace your global LiveKit SIP endpoint with a [region-based endpoint](https://docs.livekit.io/sip/cloud.md#region-pinning).
+
 ## Provider-specific instructions
 
 For step-by-step instructions for Telnyx, Twilio, or Plivo, see the following quickstarts:
@@ -35091,6 +35557,10 @@ For inbound trunks, configure an [origination URI](https://www.twilio.com/docs/s
 
 ```
 
+> ℹ️ **Region-based endpoints**
+> 
+> To restrict calls to a specific region, replace your global LiveKit SIP endpoint with a [region-based endpoint](https://docs.livekit.io/sip/cloud.md#region-pinning).
+
 ---
 
 **Outbound**:
@@ -35138,6 +35608,10 @@ twilio api trunking v1 trunks phone-numbers create \
 
 - Navigate to **Voice** » **Manage** » **Origination connection policy**, and create an **Origination Connection Policy**
 - Select the policy you just created and set the [Origination SIP URI](https://www.twilio.com/docs/sip-trunking#origination) to your LiveKit SIP URI (available on your [**Project settings**](https://cloud.livekit.io/projects/p_/settings/project) page). For example, `sip:vjnxecm0tjk.sip.livekit.cloud`.
+
+> ℹ️ **Region-based endpoints**
+> 
+> To restrict calls to a specific region, replace your global LiveKit SIP endpoint with a [region-based endpoint](https://docs.livekit.io/sip/cloud.md#region-pinning).
 5. For outbound calls, configure termination and authentication:
 
 - Navigate to **Elastic SIP Trunking** » **Manage** » **Trunks**.
@@ -35325,6 +35799,10 @@ curl -L 'https://api.telnyx.com/v2/fqdns' \
 
 ```
 
+> ℹ️ **Region-based endpoints**
+> 
+> To restrict calls to a specific region, replace your global LiveKit SIP endpoint with a [region-based endpoint](https://docs.livekit.io/sip/cloud.md#region-pinning).
+
 ### Step 3: Associate phone number and trunk
 
 1. Get the phone number ID for phone number `5105550100`:
@@ -35380,6 +35858,10 @@ curl -L -X PATCH 'https://api.telnyx.com/v2/phone_numbers/<phone_number_id>' \
 - Select **Add FQDN** and enter your [LiveKit SIP endpoint](https://docs.livekit.io/sip/quickstarts/configuring-sip-trunk.md#sip-endpoint) into the **FQDN** field.
 
 For example, `vjnxecm0tjk.sip.livekit.cloud`.
+
+> ℹ️ **Region-based endpoints**
+> 
+> To restrict calls to a specific region, replace your global LiveKit SIP endpoint with a [region-based endpoint](https://docs.livekit.io/sip/cloud.md#region-pinning).
 - Select the **Inbound** tab. In the **Destination Number Format** field, select `+E.164`.
 - In the **SIP Transport Protocol** field, select either **TCP** or **UDP**.
 - In the **SIP Region** field, select your region.
@@ -35426,6 +35908,10 @@ Create a Plivo SIP trunk for incoming or outgoing calls, or both, using the foll
 1. Select **Create New Inbound Trunk** and provide a descriptive name for your trunk.
 2. Under **Trunk Authentication**, click **Add New URI**.
 3. Enter your [LiveKit SIP endpoint](https://docs.livekit.io/sip/quickstarts/configuring-sip-trunk.md#sip-endpoint). For example, `vjnxecm0tjk.sip.livekit.cloud`
+
+> ℹ️ **Region-based endpoints**
+> 
+> To restrict calls to a specific region, replace your global LiveKit SIP endpoint with a [region-based endpoint](https://docs.livekit.io/sip/cloud.md#region-pinning).
 4. Select **Create Trunk** to complete your inbound trunk creation.
 5. Navigate to the [**Phone Numbers Dashboard**](https://console.plivo.com/active-phone-numbers/) and select the number to route to your inbound trunk.
 6. Under **Number Configuration**, set **Trunk** to your newly created inbound trunk and select **Update** to save.
@@ -40249,5 +40735,5 @@ Check with your SIP trunking provider and verify you're using the correct SIP en
 
 ---
 
-This document was rendered at 2025-08-27T23:35:16.246Z.
+This document was rendered at 2025-08-28T20:30:36.034Z.
 For the latest version of this document, see [https://docs.livekit.io/llms-full.txt](https://docs.livekit.io/llms-full.txt).

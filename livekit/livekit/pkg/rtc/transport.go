@@ -329,7 +329,7 @@ func newPeerConnection(params TransportParams, onBandwidthEstimator func(estimat
 		se.SetFireOnTrackBeforeFirstRTP(true)
 	}
 
-	if params.ClientInfo.SupportSctpZeroChecksum() {
+	if params.ClientInfo.SupportsSctpZeroChecksum() {
 		se.EnableSCTPZeroChecksum(true)
 	}
 
@@ -352,7 +352,7 @@ func newPeerConnection(params TransportParams, onBandwidthEstimator func(estimat
 	//
 	se.DisableSRTPReplayProtection(true)
 	se.DisableSRTCPReplayProtection(true)
-	if !params.ProtocolVersion.SupportsICELite() || !params.ClientInfo.SupportPrflxOverRelay() {
+	if !params.ProtocolVersion.SupportsICELite() || !params.ClientInfo.SupportsPrflxOverRelay() {
 		// if client don't support prflx over relay which is only Firefox, disable ICE Lite to ensure that
 		// aggressive nomination is handled properly. Firefox does aggressive nomination even if peer is
 		// ICE Lite (see comment as to historical reasons: https://github.com/pion/ice/pull/739#issuecomment-2452245066).
@@ -366,7 +366,7 @@ func newPeerConnection(params TransportParams, onBandwidthEstimator func(estimat
 	se.SetICETimeouts(iceDisconnectedTimeout, iceFailedTimeout, iceKeepaliveInterval)
 
 	// if client don't support prflx over relay, we should not expose private address to it, use single external ip as host candidate
-	if !params.ClientInfo.SupportPrflxOverRelay() && len(params.Config.NAT1To1IPs) > 0 {
+	if !params.ClientInfo.SupportsPrflxOverRelay() && len(params.Config.NAT1To1IPs) > 0 {
 		var nat1to1Ips []string
 		var includeIps []string
 		for _, mapping := range params.Config.NAT1To1IPs {
@@ -424,7 +424,8 @@ func newPeerConnection(params TransportParams, onBandwidthEstimator func(estimat
 				}
 			}
 		}
-	} else {
+	}
+	if !params.IsOfferer {
 		// sfu only use interceptor to send XR but don't read response from it (use buffer instead),
 		// so use a empty callback here
 		ir.Add(lkinterceptor.NewRTTFromXRFactory(func(rtt uint32) {}))
@@ -955,10 +956,10 @@ func (t *PCTransport) AddTrack(
 		return
 	}
 
+	configureTransceiverCodecs(transceiver, enabledCodecs, rtcpFeedbackConfig, !t.params.IsOfferer)
 	if trackLocal.Kind() == webrtc.RTPCodecTypeAudio {
 		configureAudioTransceiver(transceiver, params.Stereo, !params.Red || !t.params.ClientInfo.SupportsAudioRED())
 	}
-	configureTransceiverCodecs(transceiver, enabledCodecs, rtcpFeedbackConfig, !t.params.IsOfferer)
 	t.adjustNumOutstandingMedia(transceiver)
 	return
 }
@@ -980,10 +981,10 @@ func (t *PCTransport) AddTransceiverFromTrack(
 		return
 	}
 
+	configureTransceiverCodecs(transceiver, enabledCodecs, rtcpFeedbackConfig, !t.params.IsOfferer)
 	if trackLocal.Kind() == webrtc.RTPCodecTypeAudio {
 		configureAudioTransceiver(transceiver, params.Stereo, !params.Red || !t.params.ClientInfo.SupportsAudioRED())
 	}
-	configureTransceiverCodecs(transceiver, enabledCodecs, rtcpFeedbackConfig, !t.params.IsOfferer)
 	t.adjustNumOutstandingMedia(transceiver)
 	return
 }
@@ -1922,9 +1923,9 @@ func (t *PCTransport) preparePC(previousAnswer webrtc.SessionDescription) error 
 	return t.pc.SetRemoteDescription(ans)
 }
 
-func (t *PCTransport) initPCWithPreviousRemoteDescription(previousRemoteDescription webrtc.SessionDescription) (map[string]*webrtc.RTPSender, error) {
+func (t *PCTransport) initPCWithPreviousAnswer(previousAnswer webrtc.SessionDescription) (map[string]*webrtc.RTPSender, error) {
 	senders := make(map[string]*webrtc.RTPSender)
-	parsed, err := previousRemoteDescription.Unmarshal()
+	parsed, err := previousAnswer.Unmarshal()
 	if err != nil {
 		return senders, err
 	}
@@ -1941,7 +1942,7 @@ func (t *PCTransport) initPCWithPreviousRemoteDescription(previousRemoteDescript
 				// that not consistent with our previous answer that data channel might at middle-line
 				// because sdp can negotiate multi times before migration.(it will sticky to the last m-line at first negotiate)
 				// so use a dummy pc to negotiate sdp to fixed the datachannel's mid at same position with previous answer
-				if err := t.preparePC(previousRemoteDescription); err != nil {
+				if err := t.preparePC(previousAnswer); err != nil {
 					t.params.Logger.Warnw("prepare pc for migration failed", err)
 					return senders, err
 				}
@@ -1951,10 +1952,16 @@ func (t *PCTransport) initPCWithPreviousRemoteDescription(previousRemoteDescript
 			continue
 		}
 
-		_, ok1 := m.Attribute(webrtc.RTPTransceiverDirectionSendrecv.String())
-		_, ok2 := m.Attribute(webrtc.RTPTransceiverDirectionRecvonly.String())
-		if !ok1 && !ok2 {
-			continue
+		if !t.params.IsOfferer {
+			// `sendrecv` or `sendonly` means this transceiver is used for sending
+
+			// Note that a transceiver previously used to send could be `inactive`.
+			// Let those transceivers be created when remote description is set.
+			_, ok1 := m.Attribute(webrtc.RTPTransceiverDirectionSendrecv.String())
+			_, ok2 := m.Attribute(webrtc.RTPTransceiverDirectionSendonly.String())
+			if !ok1 && !ok2 {
+				continue
+			}
 		}
 
 		tr, err := t.pc.AddTransceiverFromKind(
@@ -1983,31 +1990,45 @@ func (t *PCTransport) initPCWithPreviousRemoteDescription(previousRemoteDescript
 }
 
 func (t *PCTransport) SetPreviousSdp(localDescription, remoteDescription *webrtc.SessionDescription) {
-	// when there is no remote description, cannot migrate, force a full reconnect
-	if remoteDescription == nil {
-		t.onNegotiationFailed(true, "no previous remote description")
+	// when there is no answer, cannot migrate, force a full reconnect
+	if (t.params.IsOfferer && remoteDescription == nil) || (!t.params.IsOfferer && localDescription == nil) {
+		t.onNegotiationFailed(true, "no previous answer")
 		return
 	}
 
 	t.lock.Lock()
-	if t.pc.RemoteDescription() == nil && t.previousAnswer == nil {
-		if t.params.IsOfferer {
+	var (
+		senders   map[string]*webrtc.RTPSender
+		err       error
+		parseMids bool
+	)
+	if t.params.IsOfferer {
+		if t.pc.RemoteDescription() == nil && t.previousAnswer == nil {
 			t.previousAnswer = remoteDescription
+			senders, err = t.initPCWithPreviousAnswer(*remoteDescription)
+			parseMids = true
 		}
-		if senders, err := t.initPCWithPreviousRemoteDescription(*remoteDescription); err != nil {
-			t.lock.Unlock()
+	} else {
+		if t.pc.LocalDescription() == nil {
+			senders, err = t.initPCWithPreviousAnswer(*localDescription)
+			parseMids = true
+		}
+	}
+	if err != nil {
+		t.lock.Unlock()
+		t.onNegotiationFailed(true, fmt.Sprintf("initPCWithPreviousAnswer failed, error: %s", err))
+		return
+	}
 
-			t.onNegotiationFailed(true, fmt.Sprintf("initPCWithPreviousRemoteDescription failed, error: %s", err))
-			return
-		} else if localDescription != nil {
-			// in migration case, can't reuse transceiver before negotiated except track subscribed at previous node
-			t.canReuseTransceiver = false
-			if err := t.parseTrackMid(*localDescription, senders); err != nil {
-				t.params.Logger.Warnw(
-					"parse previous local description failed", err,
-					"localDescription", localDescription.SDP,
-				)
-			}
+	if localDescription != nil && parseMids {
+		// in migration case, can't reuse transceiver before negotiating excepted tracks
+		// that were subscribed at previous node
+		t.canReuseTransceiver = false
+		if err := t.parseTrackMid(*localDescription, senders); err != nil {
+			t.params.Logger.Warnw(
+				"parse previous local description failed", err,
+				"localDescription", localDescription.SDP,
+			)
 		}
 	}
 
@@ -2579,7 +2600,7 @@ func (t *PCTransport) handleRemoteOfferReceived(sd *webrtc.SessionDescription, o
 
 	parsed, err := sd.Unmarshal()
 	if err != nil {
-		return nil
+		return err
 	}
 
 	t.lock.Lock()
@@ -2640,7 +2661,11 @@ func (t *PCTransport) handleRemoteOfferReceived(sd *webrtc.SessionDescription, o
 func (t *PCTransport) handleRemoteAnswerReceived(sd *webrtc.SessionDescription, answerId uint32) error {
 	t.params.Logger.Debugw("processing answer", "answerId", answerId)
 	if answerId != 0 && answerId != t.localOfferId.Load() {
-		t.params.Logger.Warnw("sdp state: answer id mismatch", nil, "expected", t.localOfferId.Load(), "got", answerId)
+		t.params.Logger.Warnw(
+			"sdp state: answer id mismatch", nil,
+			"expected", t.localOfferId.Load(),
+			"got", answerId,
+		)
 	}
 	t.remoteAnswerId.Store(answerId)
 

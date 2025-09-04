@@ -75,7 +75,7 @@ export default defineAgent({
     // To use a realtime model instead of a voice pipeline, use the following session setup instead:
     // const session = new voice.AgentSession({
     //   // See all providers at https://docs.livekit.io/agents/integrations/realtime/
-    //   llm: new openai.realtime.RealtimeModel(),
+    //   llm: new openai.realtime.RealtimeModel({ voice: 'marin' }),
     // });
 
     // Metrics collection, to measure pipeline performance

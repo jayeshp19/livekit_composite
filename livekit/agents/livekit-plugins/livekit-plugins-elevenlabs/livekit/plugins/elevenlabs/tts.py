@@ -21,7 +21,7 @@ import json
 import os
 import weakref
 from dataclasses import dataclass, replace
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 import aiohttp
 
@@ -94,6 +94,7 @@ class TTS(tts.TTS):
         http_session: aiohttp.ClientSession | None = None,
         language: NotGivenOr[str] = NOT_GIVEN,
         sync_alignment: bool = True,
+        preferred_alignment: Literal["normalized", "original"] = "normalized",
     ) -> None:
         """
         Create a new instance of ElevenLabs TTS.
@@ -113,6 +114,7 @@ class TTS(tts.TTS):
             http_session (aiohttp.ClientSession | None): Custom HTTP session for API requests. Optional.
             language (NotGivenOr[str]): Language code for the TTS model, as of 10/24/24 only valid for "eleven_turbo_v2_5".
             sync_alignment (bool): Enable sync alignment for the TTS model. Defaults to True.
+            preferred_alignment (Literal["normalized", "original"]): Use normalized or original alignment. Defaults to "normalized".
         """  # noqa: E501
 
         if not is_given(encoding):
@@ -164,6 +166,7 @@ class TTS(tts.TTS):
             inactivity_timeout=inactivity_timeout,
             sync_alignment=sync_alignment,
             auto_mode=auto_mode,
+            preferred_alignment=preferred_alignment,
         )
         self._session = http_session
         self._streams = weakref.WeakSet[SynthesizeStream]()
@@ -361,7 +364,6 @@ class SynthesizeStream(tts.SynthesizeStream):
 
         waiter: asyncio.Future[None] = asyncio.get_event_loop().create_future()
         connection.register_stream(self, output_emitter, waiter)
-        started_event = asyncio.Event()
 
         async def _input_task() -> None:
             async for data in self._input_ch:
@@ -407,8 +409,6 @@ class SynthesizeStream(tts.SynthesizeStream):
                     _SynthesizeContent(self._context_id, formatted_text, flush=flush_on_chunk)
                 )
                 self._mark_started()
-                if not started_event.is_set():
-                    started_event.set()
 
             if xml_content:
                 logger.warning("ElevenLabs stream ended with incomplete xml content")
@@ -420,9 +420,7 @@ class SynthesizeStream(tts.SynthesizeStream):
         stream_t = asyncio.create_task(_sentence_stream_task())
 
         try:
-            # start clock on the timeout only after we've pushed some input
-            await started_event.wait()
-            await asyncio.wait_for(waiter, self._conn_options.timeout)
+            await waiter
         except asyncio.TimeoutError as e:
             raise APITimeoutError() from e
         except Exception as e:
@@ -450,6 +448,7 @@ class _TTSOptions:
     enable_ssml_parsing: bool
     inactivity_timeout: int
     sync_alignment: bool
+    preferred_alignment: Literal["normalized", "original"]
     auto_mode: NotGivenOr[bool]
 
 
@@ -465,6 +464,14 @@ class _CloseContext:
     context_id: str
 
 
+@dataclass
+class _StreamData:
+    emitter: tts.AudioEmitter
+    stream: SynthesizeStream
+    waiter: asyncio.Future[None]
+    timeout_timer: asyncio.TimerHandle | None = None
+
+
 class _Connection:
     """Manages a single WebSocket connection with send/recv loops for multi-context TTS"""
 
@@ -476,9 +483,7 @@ class _Connection:
         self._active_contexts: set[str] = set()
         self._input_queue = utils.aio.Chan[Union[_SynthesizeContent, _CloseContext]]()
 
-        self._context_emitters: dict[str, tts.AudioEmitter] = {}
-        self._context_streams: dict[str, SynthesizeStream] = {}
-        self._context_waiters: dict[str, asyncio.Future[None]] = {}
+        self._context_data: dict[str, _StreamData] = {}
 
         self._send_task: asyncio.Task | None = None
         self._recv_task: asyncio.Task | None = None
@@ -509,13 +514,13 @@ class _Connection:
         self._recv_task = asyncio.create_task(self._recv_loop())
 
     def register_stream(
-        self, stream: SynthesizeStream, emitter: tts.AudioEmitter, waiter: asyncio.Future[None]
+        self, stream: SynthesizeStream, emitter: tts.AudioEmitter, done_fut: asyncio.Future[None]
     ) -> None:
         """Register a new synthesis stream with this connection"""
         context_id = stream._context_id
-        self._context_streams[context_id] = stream
-        self._context_emitters[context_id] = emitter
-        self._context_waiters[context_id] = waiter
+        self._context_data[context_id] = _StreamData(
+            emitter=emitter, stream=stream, waiter=done_fut
+        )
 
     def send_content(self, content: _SynthesizeContent) -> None:
         """Send synthesis content to the connection"""
@@ -568,6 +573,10 @@ class _Connection:
                     }
                     if msg.flush:
                         pkt["flush"] = True
+
+                    # start timeout timer for this context
+                    self._start_timeout_timer(msg.context_id)
+
                     await self._ws.send_json(pkt)
 
                 elif isinstance(msg, _CloseContext):
@@ -606,21 +615,44 @@ class _Connection:
                 data = json.loads(msg.data)
                 context_id = data.get("contextId")
 
-                if not context_id or context_id not in self._context_emitters:
+                if not context_id or context_id not in self._context_data:
                     continue
 
-                emitter = self._context_emitters[context_id]
-                stream = self._context_streams.get(context_id)
+                ctx = self._context_data[context_id]
+
+                if error := data.get("error"):
+                    logger.error(
+                        "elevenlabs tts returned error",
+                        extra={"context_id": context_id, "error": error},
+                    )
+                    if not ctx.waiter.done():
+                        ctx.waiter.set_exception(APIError(message=error))
+                    self._cleanup_context(context_id)
+                    continue
+
+                emitter = ctx.emitter
+                stream = ctx.stream
 
                 # ensure alignment
-                alignment = data.get("normalizedAlignment") or data.get("alignment")
+                alignment = (
+                    data.get("normalizedAlignment")
+                    if self._opts.preferred_alignment == "normalized"
+                    else data.get("alignment")
+                )
                 if alignment and stream is not None:
-                    stream._text_buffer += "".join(alignment["chars"])
+                    chars = alignment["chars"]
                     starts = alignment.get("charStartTimesMs") or alignment.get("charsStartTimesMs")
                     durs = alignment.get("charDurationsMs") or alignment.get("charsDurationsMs")
-                    if starts and durs:
-                        stream._start_times_ms += starts
-                        stream._durations_ms += durs
+                    if starts and durs and len(chars) == len(durs) and len(starts) == len(durs):
+                        stream._text_buffer += "".join(chars)
+                        # in case item in chars has multiple characters
+                        for char, start, dur in zip(chars, starts, durs):
+                            if len(char) > 1:
+                                stream._start_times_ms += [start] * (len(char) - 1)
+                                stream._durations_ms += [0] * (len(char) - 1)
+                            stream._start_times_ms.append(start)
+                            stream._durations_ms.append(dur)
+
                         timed_words, stream._text_buffer = _to_timed_words(
                             stream._text_buffer, stream._start_times_ms, stream._durations_ms
                         )
@@ -631,6 +663,8 @@ class _Connection:
                 if data.get("audio"):
                     b64data = base64.b64decode(data["audio"])
                     emitter.push(b64data)
+                    if ctx.timeout_timer:
+                        ctx.timeout_timer.cancel()
 
                 if data.get("isFinal"):
                     if stream is not None:
@@ -642,10 +676,8 @@ class _Connection:
                         )
                         emitter.push_timed_transcript(timed_words)
 
-                    fut = self._context_waiters.pop(context_id, None)
-                    if fut and not fut.done():
-                        fut.set_result(None)
-
+                    if not ctx.waiter.done():
+                        ctx.waiter.set_result(None)
                     self._cleanup_context(context_id)
 
                     if not self._is_current and not self._active_contexts:
@@ -653,19 +685,39 @@ class _Connection:
                         break
         except Exception as e:
             logger.warning("recv loop error", exc_info=e)
-            for fut in self._context_waiters.values():
-                if not fut.done():
-                    fut.set_exception(e)
-            self._context_waiters.clear()
+            for ctx in self._context_data.values():
+                if not ctx.waiter.done():
+                    ctx.waiter.set_exception(e)
+                if ctx.timeout_timer:
+                    ctx.timeout_timer.cancel()
+            self._context_data.clear()
         finally:
             if not self._closed:
                 await self.aclose()
 
     def _cleanup_context(self, context_id: str) -> None:
         """Clean up context state"""
-        self._context_emitters.pop(context_id, None)
-        self._context_streams.pop(context_id, None)
+        ctx = self._context_data.pop(context_id, None)
+        if ctx and ctx.timeout_timer:
+            ctx.timeout_timer.cancel()
+
         self._active_contexts.discard(context_id)
+
+    def _start_timeout_timer(self, context_id: str) -> None:
+        """Start a timeout timer for a context"""
+        if not (ctx := self._context_data.get(context_id)) or ctx.timeout_timer:
+            return
+
+        timeout = ctx.stream._conn_options.timeout
+
+        def _on_timeout() -> None:
+            if not ctx.waiter.done():
+                ctx.waiter.set_exception(
+                    APITimeoutError(f"11labs tts timed out after {timeout} seconds")
+                )
+            self._cleanup_context(context_id)
+
+        ctx.timeout_timer = asyncio.get_event_loop().call_later(timeout, _on_timeout)
 
     async def aclose(self) -> None:
         """Close the connection and clean up"""
@@ -675,12 +727,14 @@ class _Connection:
         self._closed = True
         self._input_queue.close()
 
-        for fut in self._context_waiters.values():
-            if not fut.done():
+        for ctx in self._context_data.values():
+            if not ctx.waiter.done():
                 # do not cancel the future as it becomes difficult to catch
                 # all pending tasks will be aborted with an exception
-                fut.set_exception(APIStatusError("connection closed"))
-        self._context_waiters.clear()
+                ctx.waiter.set_exception(APIStatusError("connection closed"))
+            if ctx.timeout_timer:
+                ctx.timeout_timer.cancel()
+        self._context_data.clear()
 
         if self._ws:
             await self._ws.close()
